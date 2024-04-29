@@ -31,7 +31,7 @@ gsutil 5.27
 
 # Architecture
 
-![architecture](./.excalidraw.png)
+![architecture](./terraform/.excalidraw.png)
 
 
 # App
