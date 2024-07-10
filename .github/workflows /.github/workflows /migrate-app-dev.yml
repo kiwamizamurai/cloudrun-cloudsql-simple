@@ -1,0 +1,94 @@
+name: migration on dev
+run-name: migration by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+
+env:
+  # https://stackoverflow.com/questions/73891299/docker-push-missing-image-name-error-when-pushing-to-gcp-artifact-registry-fro
+  IMAGE: 'asia-northeast1-docker.pkg.dev/xxxx/xxxx/migration:latest'
+  GOOGLE_IAM_WORKLOAD_IDENTITY_POOL_PROVIDER: "projects/xxxx/locations/global/workloadIdentityPools/gh-oidc-pool/providers/github-actions"
+  SERVICE_ACCOUNT_EMAIL: "github-actions@xxxx.iam.gserviceaccount.com"
+  SLACK_WEBHOOK: "https://hooks.slack.com/services/xxxx/xxxx/xxxx"
+
+jobs:
+  migrate:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: gcloud Auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ env.GOOGLE_IAM_WORKLOAD_IDENTITY_POOL_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+        with:
+          version: '464.0.0'
+
+      - name: Init docker for gcloud
+        run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+
+      - name: Build docker image
+        run: docker build --target migration -t ${{ env.IMAGE }} -f Dockerfile .
+
+      - name: Push docker image for container registory
+        run: docker push ${{ env.IMAGE }}
+
+      - name: Deploy CloudRun Job
+        run: gcloud run jobs execute db-migration --region asia-northeast1  --update-env-vars POSTGRES_URL=postgresql://xxxx:xxxx@10.10.0.5/xxxx
+
+      - name: Send a message to slack
+        if: ${{ always() }}
+        id: slack
+        uses: slackapi/slack-github-action@v1.16.0
+        with:
+          channel-id: 'xxxx'
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "マイグレーション: ${{ job.status }}"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "text": {
+                  "type": "mrkdwn",
+                  "text": "<${{ github.event.pull_request.html_url || github.event.head_commit.url }}|PR/Commit>"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Workflow>"
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "Author: <https://github.com/${{ github.event.sender.login }}|@${{ github.event.sender.login }}>"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK }}
